@@ -156,6 +156,9 @@ class SystemResult:
     is_fatal: bool
     raw_response: str
     audit_reasoning: str
+    ttft: float = 0.0
+    total_time: float = 0.0
+    retrieval_time: float = 0.0
     fatal_reason: str = ""
 
 @dataclass
@@ -210,6 +213,28 @@ def load_and_process_data(file_path_or_buffer) -> List[EvaluationCase]:
         st.error(f"读取文件时出错: {e}")
         return []
 
+    # --- Robust Column Mapping Logic ---
+    # Normalizing column names to handle OCR errors (e.g. Av9 -> Avg, TimeCAy -> Time)
+    col_map = {}
+    for col in df.columns:
+        upper_col = str(col).upper()
+        if 'TTFT' in upper_col:
+            col_map['ttft'] = col
+        elif 'RETRIEVAL' in upper_col:
+            col_map['retrieval'] = col
+        elif 'TOTAL TIME' in upper_col:
+            col_map['total_time'] = col
+
+    def safe_get_float(row, key_id):
+        col_name = col_map.get(key_id)
+        if col_name and col_name in row:
+            val = row[col_name]
+            try:
+                return float(val) if pd.notnull(val) else 0.0
+            except:
+                return 0.0
+        return 0.0
+
     df = df.fillna({
         'CITATION_RULE': '无具体规则',
         'QUESTION': '未找到问题内容',
@@ -236,6 +261,9 @@ def load_and_process_data(file_path_or_buffer) -> List[EvaluationCase]:
                     is_fatal=str(row['S4_FATAL']).upper() == 'YES',
                     raw_response=str(row['MODEL_OUTPUT']),
                     audit_reasoning=str(row['AUDIT_REASONING']),
+                    ttft=safe_get_float(row, 'ttft'),
+                    total_time=safe_get_float(row, 'total_time'),
+                    retrieval_time=safe_get_float(row, 'retrieval_time'),
                     fatal_reason=str(row.get('S4_REASON', ''))
                 ))
             else:
@@ -320,7 +348,14 @@ def render_summary_section(cases: List[EvaluationCase]):
     all_res = []
     for c in cases:
         for r in c.results:
-            all_res.append({'System': r.system_name, 'Score': r.score, 'Fatal': 1 if r.is_fatal else 0})
+            all_res.append({
+                'System': r.system_name, 
+                'Score': r.score, 
+                'Fatal': 1 if r.is_fatal else 0,
+                'TTFT': r.ttft,
+                'Retrieval': r.retrieval_time,
+                'Total': r.total_time
+            })
     
     res_df = pd.DataFrame(all_res)
     systems = res_df['System'].unique()
@@ -333,8 +368,9 @@ def render_summary_section(cases: List[EvaluationCase]):
         theme_color = '#3b82f6' if i%3==0 else '#d946ef' if i%3==1 else '#fbbf24'
         
         with cols[i]:
+            # Header Card for Score
             st.markdown(f"""
-            <div class="metric-card" style="border-top: 6px solid {theme_color};">
+            <div class="metric-card" style="border-top: 6px solid {theme_color}; margin-bottom: 10px;">
                 <div style="font-weight:900; font-size:1.2em; color:#1e293b; margin-bottom:8px;">{sys}</div>
                 <div style="display:flex; justify-content:space-between; align-items:flex-end;">
                     <div>
@@ -348,72 +384,25 @@ def render_summary_section(cases: List[EvaluationCase]):
                 </div>
             </div>
             """, unsafe_allow_html=True)
+            
+            # --- New Injection: Performance Metrics below Total Score ---
+            m_cols = st.columns(2)
+            
+            def format_time(val):
+                if val == 0: return "N/A"
+                if val < 1: return f"{val*1000:.0f}ms"
+                return f"{val:.2f}s"
+
+            avg_ttft = sys_data['TTFT'].mean()
+            avg_tot = sys_data['Total'].mean()
+
+            with m_cols[0]:
+                st.metric("平均首字响应 (TTFT)", format_time(avg_ttft))
+            with m_cols[1]:
+                st.metric("平均总耗时", format_time(avg_tot))
     st.divider()
 
-def render_performance_section():
-    st.markdown("### ⚡ 系统性能对比 (Performance Comparison)")
-    
-    # Static performance data
-    perf_data = [
-        {
-            "name": "Dify",
-            "retrieval": 28.436,
-            "ttft": 31.606,
-            "total": 40.685,
-            "color": "#3b82f6",  # Blue
-        },
-        {
-            "name": "品茗晓筑",
-            "retrieval": 1.000,
-            "ttft": 27.600,
-            "total": 47.300,
-            "color": "#fbbf24",  # Orange
-        },
-        {
-            "name": "FAST",
-            "retrieval": 9.800,
-            "ttft": 39.220,
-            "total": 49.580,
-            "color": "#d946ef",  # Purple
-        }
-    ]
-    
-    # Highlight logic: Find min values
-    min_retrieval = min(d["retrieval"] for d in perf_data)
-    min_ttft = min(d["ttft"] for d in perf_data)
-    min_total = min(d["total"] for d in perf_data)
-    
-    cols = st.columns(3)
-    for i, data in enumerate(perf_data):
-        with cols[i]:
-            # Highlight check
-            retrieval_style = "font-weight:900; color:#059669;" if data["retrieval"] == min_retrieval else ""
-            retrieval_icon = " ⚡" if data["retrieval"] == min_retrieval else ""
-            
-            ttft_style = "font-weight:900; color:#059669;" if data["ttft"] == min_ttft else ""
-            ttft_icon = " ⚡" if data["ttft"] == min_ttft else ""
-            
-            total_style = "font-weight:900; color:#059669;" if data["total"] == min_total else ""
-            total_icon = " ⚡" if data["total"] == min_total else ""
-            
-            st.markdown(f"""
-            <div class="metric-card" style="border-top: 6px solid {data['color']}; min-height: 220px;">
-                <div style="font-weight:900; font-size:1.2em; color:#1e293b; margin-bottom:12px; border-bottom: 1px solid #f1f5f9; padding-bottom:4px;">{data['name']}</div>
-                <div style="margin-bottom: 10px;">
-                    <div style="font-size:0.75em; color:#64748b; text-transform:uppercase;">平均检索耗时</div>
-                    <div style="font-size:1.4em; {retrieval_style}">{data['retrieval']:.3f}s{retrieval_icon}</div>
-                </div>
-                <div style="margin-bottom: 10px;">
-                    <div style="font-size:0.75em; color:#64748b; text-transform:uppercase;">平均首字响应时间 (TTFT)</div>
-                    <div style="font-size:1.4em; {ttft_style}">{data['ttft']:.3f}s{ttft_icon}</div>
-                </div>
-                <div>
-                    <div style="font-size:0.75em; color:#64748b; text-transform:uppercase;">平均总耗时</div>
-                    <div style="font-size:1.4em; {total_style}">{data['total']:.3f}s{total_icon}</div>
-                </div>
-            </div>
-            """, unsafe_allow_html=True)
-    st.divider()
+# Removed render_performance_section as it is now integrated into summary
 
 # --- Main App ---
 def main():
@@ -451,7 +440,7 @@ def main():
             
             # Rendering
             render_summary_section(cases)
-            render_performance_section()
+            
             
             display_cases = [c for c in cases if any(r.is_fatal for r in c.results)] if show_fatal else cases
             st.write(f"当前视图：共展示 {len(display_cases)} / {len(cases)} 组用例")
