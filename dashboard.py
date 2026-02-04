@@ -350,6 +350,71 @@ def render_summary_section(cases: List[EvaluationCase]):
             """, unsafe_allow_html=True)
     st.divider()
 
+def render_performance_section():
+    st.markdown("### ⚡ 系统性能对比 (Performance Comparison)")
+    
+    # Static performance data
+    perf_data = [
+        {
+            "name": "Dify",
+            "retrieval": 28.436,
+            "ttft": 31.606,
+            "total": 40.685,
+            "color": "#3b82f6",  # Blue
+        },
+        {
+            "name": "品茗晓筑",
+            "retrieval": 1.000,
+            "ttft": 27.600,
+            "total": 47.300,
+            "color": "#fbbf24",  # Orange
+        },
+        {
+            "name": "FAST",
+            "retrieval": 9.800,
+            "ttft": 39.220,
+            "total": 49.580,
+            "color": "#d946ef",  # Purple
+        }
+    ]
+    
+    # Highlight logic: Find min values
+    min_retrieval = min(d["retrieval"] for d in perf_data)
+    min_ttft = min(d["ttft"] for d in perf_data)
+    min_total = min(d["total"] for d in perf_data)
+    
+    cols = st.columns(3)
+    for i, data in enumerate(perf_data):
+        with cols[i]:
+            # Highlight check
+            retrieval_style = "font-weight:900; color:#059669;" if data["retrieval"] == min_retrieval else ""
+            retrieval_icon = " ⚡" if data["retrieval"] == min_retrieval else ""
+            
+            ttft_style = "font-weight:900; color:#059669;" if data["ttft"] == min_ttft else ""
+            ttft_icon = " ⚡" if data["ttft"] == min_ttft else ""
+            
+            total_style = "font-weight:900; color:#059669;" if data["total"] == min_total else ""
+            total_icon = " ⚡" if data["total"] == min_total else ""
+            
+            st.markdown(f"""
+            <div class="metric-card" style="border-top: 6px solid {data['color']}; min-height: 220px;">
+                <div style="font-weight:900; font-size:1.2em; color:#1e293b; margin-bottom:12px; border-bottom: 1px solid #f1f5f9; padding-bottom:4px;">{data['name']}</div>
+                <div style="margin-bottom: 10px;">
+                    <div style="font-size:0.75em; color:#64748b; text-transform:uppercase;">平均检索耗时</div>
+                    <div style="font-size:1.4em; {retrieval_style}">{data['retrieval']:.3f}s{retrieval_icon}</div>
+                </div>
+                <div style="margin-bottom: 10px;">
+                    <div style="font-size:0.75em; color:#64748b; text-transform:uppercase;">平均首字响应时间 (TTFT)</div>
+                    <div style="font-size:1.4em; {ttft_style}">{data['ttft']:.3f}s{ttft_icon}</div>
+                </div>
+                <div>
+                    <div style="font-size:0.75em; color:#64748b; text-transform:uppercase;">平均总耗时</div>
+                    <div style="font-size:1.4em; {total_style}">{data['total']:.3f}s{total_icon}</div>
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
+    st.divider()
+
 # --- Main App ---
 def main():
     st.title("🛡️ AI 评测审计控制台 (v7.0)")
@@ -386,6 +451,7 @@ def main():
             
             # Rendering
             render_summary_section(cases)
+            render_performance_section()
             
             display_cases = [c for c in cases if any(r.is_fatal for r in c.results)] if show_fatal else cases
             st.write(f"当前视图：共展示 {len(display_cases)} / {len(cases)} 组用例")
